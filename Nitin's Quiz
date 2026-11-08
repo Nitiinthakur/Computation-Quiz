@@ -1,0 +1,243 @@
+├── index.html                   # HTML entry point with fonts & metadata
+├── src/
+│   ├── types/
+│   │   └── quiz.ts              # TypeScript models (Question, Category, Attempt, User)
+│   ├── data/
+│   │   ├── categories.ts        # 18 GK categories metadata & icons
+│   │   └── questions.ts         # 100+ Authentic bilingual questions (2020-2026)
+│   ├── services/
+│   │   └── storage.ts           # LocalStorage database engine & state persistence
+│   ├── components/
+│   │   ├── Navbar.tsx           # Responsive top bar with branding & language toggle
+│   │   ├── Hero.tsx             # Hero banner with Nitin Thakur mentor spotlight
+│   │   ├── DailyQuizBanner.tsx  # Daily GK test challenge & streak tracker
+│   │   ├── CategoryGrid.tsx     # 18 GK category cards with test launchers
+│   │   ├── YearWiseSection.tsx  # 2020–2026 archive with PYQ vs Practice filter
+│   │   ├── QuizEngine.tsx       # 30s timer, question palette & test simulator
+│   │   ├── QuizResultView.tsx   # Detailed scorecard, review & jsPDF download
+│   │   ├── CertificateModal.tsx # Gold-bordered certificate with verified ID
+│   │   ├── StudentDashboard.tsx # Learning metrics, history & saved bookmarks
+│   │   ├── SearchAndBookmarks.tsx # Full-text search across 100+ questions
+│   │   ├── LeaderboardView.tsx  # All-India ranking podium & score points
+│   │   ├── AdminPanel.tsx       # Question CRUD & Bulk JSON Import/Export
+│   │   ├── AuthModal.tsx        # Student & Admin authentication
+│   │   ├── CodeViewerModal.tsx  # In-app Source Code Inspector
+│   │   └── Footer.tsx           # Platform links & copyright
+│   ├── App.tsx                  # Root state orchestration
+│   ├── main.tsx                 # React DOM mount
+│   └── index.css                # Tailwind CSS layers & stylingexport type Language = 'en' | 'hi';
+
+export type GKCategory =
+  | 'Indian History' | 'Indian Geography' | 'Indian Polity' | 'Indian Constitution'
+  | 'General Science' | 'Physics' | 'Chemistry' | 'Biology'
+  | 'Computer Knowledge' | 'Sports GK' | 'Awards and Honours' | 'Important Days'
+  | 'Books and Authors' | 'Indian Economy' | 'Current Affairs' | 'Uttar Pradesh GK'
+  | 'World GK' | 'Static GK';
+
+export type QuestionYear = '2020' | '2021' | '2022' | '2023' | '2024' | '2025' | '2026';
+export type QuestionType = 'pyq' | 'practice';
+
+export interface Question {
+  id: string;
+  category: GKCategory;
+  year: QuestionYear;
+  type: QuestionType; // 'pyq' = Verified Previous Year Question, 'practice' = High Probability Practice
+  examSource?: string;
+  questionEn: string;
+  questionHi: string;
+  optionsEn: [string, string, string, string];
+  optionsHi: [string, string, string, string];
+  correctAnswerIndex: number;
+  explanationEn: string;
+  explanationHi: string;
+}
+
+export interface QuizAttempt {
+  id: string;
+  title: string;
+  category?: string;
+  year?: string;
+  date: string;
+  totalQuestions: number;
+  attempted: number;
+  correctAnswers: number;
+  incorrectAnswers: number;
+  unanswered: number;
+  scorePercentage: number;
+  timeSpentSeconds: number;
+  userAnswers: Record<string, number>;
+}import React, { useState, useEffect } from 'react';
+import { Question, Language, QuizAttempt } from '../types/quiz';
+import { Timer, Send, Flag, Bookmark, ChevronLeft, ChevronRight } from 'lucide-react';
+import { StorageService } from '../services/storage';
+
+export const QuizEngine: React.FC<QuizEngineProps> = ({
+  questions,
+  quizTitle,
+  language,
+  setLanguage,
+  onFinishQuiz,
+}) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
+  const [markedForReview, setMarkedForReview] = useState<Record<string, boolean>>({});
+  const [timeLeft, setTimeLeft] = useState(30); // 30-second timer per question
+
+  const currentQ = questions[currentIndex];
+  const totalQuestions = questions.length;
+
+  // Reset 30s countdown on every question change
+  useEffect(() => {
+    setTimeLeft(30);
+    const timer = setInterval(() => {
+      setTimeLeft(prev => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [currentIndex]);
+
+  const handleSelectOption = (optionIndex: number) => {
+    setUserAnswers(prev => ({ ...prev, [currentQ.id]: optionIndex }));
+  };
+
+  const calculateResults = () => {
+    let correct = 0;
+    questions.forEach(q => {
+      if (userAnswers[q.id] === q.correctAnswerIndex) correct++;
+    });
+    const attempt: QuizAttempt = {
+      id: `attempt-${Date.now()}`,
+      title: quizTitle,
+      date: new Date().toISOString(),
+      totalQuestions,
+      attempted: Object.keys(userAnswers).length,
+      correctAnswers: correct,
+      incorrectAnswers: Object.keys(userAnswers).length - correct,
+      unanswered: totalQuestions - Object.keys(userAnswers).length,
+      scorePercentage: Math.round((correct / totalQuestions) * 100),
+      timeSpentSeconds: 0,
+      userAnswers,
+    };
+    onFinishQuiz(attempt, questions);
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto p-4 sm:p-6 text-left">
+      {/* Timer Bar */}
+      <div className="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl mb-6">
+        <h2 className="text-xl font-bold font-display text-white">
+          Question {currentIndex + 1} of {totalQuestions}
+        </h2>
+        <div className={`flex items-center gap-2 font-mono font-bold text-sm px-3 py-1.5 rounded-xl border ${
+          timeLeft <= 5 ? 'bg-rose-950 border-rose-600 text-rose-300 animate-pulse' : 'bg-slate-950 border-slate-800 text-cyan-400'
+        }`}>
+          <Timer className="w-4 h-4" />
+          <span>00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
+        </div>
+      </div>
+
+      {/* Question Card & 4 Options */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+        <h3 className="text-lg font-bold text-white mb-4">
+          {language === 'hi' ? currentQ.questionHi : currentQ.questionEn}
+        </h3>
+        <div className="space-y-3">
+          {(language === 'hi' ? currentQ.optionsHi : currentQ.optionsEn).map((opt, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSelectOption(idx)}
+              className={`w-full p-3.5 rounded-xl border text-left text-sm transition-all flex items-center gap-3 ${
+                userAnswers[currentQ.id] === idx
+                  ? 'bg-amber-950/70 border-amber-500 text-white font-semibold'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-200 hover:border-slate-700'
+              }`}
+            >
+              <span className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center font-bold text-xs text-amber-400">
+                {String.fromCharCode(65 + idx)}
+              </span>
+              <span>{opt}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};import { Question, QuizAttempt, UserProfile, LeaderboardUser } from '../types/quiz';
+import { INITIAL_QUESTIONS } from '../data/questions';
+
+export const StorageService = {
+  getQuestions(): Question[] {
+    const data = localStorage.getItem('nitin_gk_questions_v1');
+    return data ? JSON.parse(data) : INITIAL_QUESTIONS;
+  },
+
+  saveQuestions(questions: Question[]): void {
+    localStorage.setItem('nitin_gk_questions_v1', JSON.stringify(questions));
+  },
+
+  addQuestion(q: Omit<Question, 'id'>): Question {
+    const questions = this.getQuestions();
+    const newQuestion: Question = { ...q, id: `q-custom-${Date.now()}` };
+    this.saveQuestions([newQuestion, ...questions]);
+    return newQuestion;
+  },
+
+  deleteQuestion(id: string): boolean {
+    const filtered = this.getQuestions().filter(q => q.id !== id);
+    this.saveQuestions(filtered);
+    return true;
+  },
+
+  saveAttempt(attempt: QuizAttempt): void {
+    const attempts = this.getAttempts();
+    localStorage.setItem('nitin_gk_history_v1', JSON.stringify([attempt, ...attempts]));
+  },
+
+  toggleBookmark(questionId: string): boolean {
+    const bookmarks = this.getBookmarks();
+    const isSaved = bookmarks.includes(questionId);
+    const updated = isSaved ? bookmarks.filter(id => id !== questionId) : [...bookmarks, questionId];
+    localStorage.setItem('nitin_gk_bookmarks_v1', JSON.stringify(updated));
+    return !isSaved;
+  }
+};import React, { useState } from 'react';
+import { StorageService } from './services/storage';
+import { Navbar } from './components/Navbar';
+import { Hero } from './components/Hero';
+import { DailyQuizBanner } from './components/DailyQuizBanner';
+import { CategoryGrid } from './components/CategoryGrid';
+import { YearWiseSection } from './components/YearWiseSection';
+import { QuizEngine } from './components/QuizEngine';
+import { QuizResultView } from './components/QuizResultView';
+import { CertificateModal } from './components/CertificateModal';
+import { StudentDashboard } from './components/StudentDashboard';
+import { SearchAndBookmarks } from './components/SearchAndBookmarks';
+import { LeaderboardView } from './components/LeaderboardView';
+import { AdminPanel } from './components/AdminPanel';
+import { CodeViewerModal } from './components/CodeViewerModal';
+import { Footer } from './components/Footer';
+
+export default function App() {
+  const [questions, setQuestions] = useState(() => StorageService.getQuestions());
+  const [user, setUser] = useState(() => StorageService.getUser());
+  const [attempts, setAttempts] = useState(() => StorageService.getAttempts());
+  const [language, setLanguageState] = useState(() => StorageService.getLanguage());
+  const [currentTab, setCurrentTab] = useState('home');
+  const [isQuizActive, setIsQuizActive] = useState(false);
+  const [showCodeModal, setShowCodeModal] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      <Navbar
+        currentTab={currentTab}
+        setCurrentTab={setCurrentTab}
+        language={language}
+        setLanguage={setLanguageState}
+        user={user}
+        onOpenCodeViewer={() => setShowCodeModal(true)}
+      />
+      {/* Active Quiz, Results, or Tab content */}
+      <CodeViewerModal isOpen={showCodeModal} onClose={() => setShowCodeModal(false)} language={language} />
+      <Footer language={language} onNavigateTab={setCurrentTab} />
+    </div>
+  );
+}
